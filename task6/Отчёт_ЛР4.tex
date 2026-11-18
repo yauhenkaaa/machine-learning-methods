@@ -1,0 +1,392 @@
+% Компиляция: Overleaf -> Menu -> Compiler = XeLaTeX (или LuaLaTeX). Пакет minted работает в Overleaf автоматически.
+\documentclass[14pt]{extarticle}
+
+\usepackage{fontspec}
+\usepackage[english,russian]{babel}
+\makeatletter
+\newcommand{\pickmain}{%
+  \IfFontExistsTF{Times New Roman}{\setmainfont{Times New Roman}}{%
+  \IfFontExistsTF{Liberation Serif}{\setmainfont{Liberation Serif}}{%
+  \IfFontExistsTF{FreeSerif}{\setmainfont{FreeSerif}}{%
+  \setmainfont{CMU Serif}}}}}
+\newcommand{\pickmono}{%
+  \IfFontExistsTF{DejaVu Sans Mono}{\setmonofont{DejaVu Sans Mono}[Scale=MatchLowercase]}{%
+  \IfFontExistsTF{FreeMono}{\setmonofont{FreeMono}[Scale=MatchLowercase]}{%
+  \setmonofont{CMU Typewriter Text}[Scale=MatchLowercase]}}}
+\makeatother
+\pickmain
+\pickmono
+
+% Поля по СТП БГУИР. Для узких полей замените строку на:
+% \usepackage[a4paper,margin=12.7mm]{geometry}
+\usepackage[a4paper,left=30mm,right=10mm,top=20mm,bottom=20mm]{geometry}
+\usepackage{graphicx}
+\usepackage{setspace}
+\usepackage{indentfirst}
+\usepackage{amsmath}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{tocloft}
+\usepackage{minted}
+
+\onehalfspacing
+\setlength{\parindent}{1.25cm}
+\titleformat{\section}{\normalsize\bfseries\raggedright}{\thesection}{1ex}{\MakeUppercase}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1ex}{}
+\captionsetup{labelsep=endash,justification=centering}
+\setminted{fontsize=\footnotesize,breaklines=true,frame=lines,framesep=2mm,baselinestretch=1}
+
+\renewcommand{\contentsname}{Оглавление}
+\renewcommand{\cfttoctitlefont}{\normalsize\bfseries\MakeUppercase}
+\renewcommand{\cftaftertoctitle}{}
+\renewcommand{\cftsecleader}{\cftdotfill{\cftdotsep}}
+\renewcommand{\cftsecfont}{\normalfont}
+\renewcommand{\cftsecpagefont}{\normalfont}
+\setlength{\cftbeforesecskip}{2pt}
+
+\newcommand{\screenshot}[2]{%
+  \begin{figure}[H]
+    \centering
+    \IfFileExists{#1}{\includegraphics[width=\textwidth,height=0.42\textheight,keepaspectratio]{#1}}{\fbox{\parbox[c][5cm][c]{0.9\textwidth}{\centering Место для скриншота: #1}}}
+    \caption{#2}
+  \end{figure}}
+
+\title{ММО ЛР№6}
+\author{Емельяненко Е.Д.}
+\date{November 2026}
+
+\begin{document}
+
+%======================== 1. ТИТУЛЬНЫЙ ЛИСТ ========================
+\begin{titlepage}
+\centering
+\singlespacing
+Министерство образования Республики Беларусь\\[2mm]
+Учреждение образования\\
+«Белорусский государственный университет информатики и радиоэлектроники»\\[8mm]
+Кафедра программного обеспечения информационных технологий\\[35mm]
+
+\textbf{ОТЧЁТ}\\
+по лабораторной работе №6\\
+по дисциплине «Методы машинного обучения»\\[3mm]
+\textbf{Случайный лес}\\[3mm]
+
+\begin{flushright}
+Выполнил: студент гр. 351002\\
+Емельяненко Е.Д.\\[5mm]
+Проверил: Лебедевич А.В.
+\end{flushright}
+
+\vfill
+Минск 2026
+\end{titlepage}
+
+\setcounter{page}{2}
+\tableofcontents
+\newpage
+
+%======================== 2. ЦЕЛЬ ========================
+\section{Цель выполнения лабораторной работы}
+
+Изучить регрессию ансамблем деревьев и получить практические навыки её решения на табличных данных: подготовить признаки, собрать случайный лес в конвейере со стандартизацией, обучить модель с параметрами по умолчанию, оценить качество по MSE, MAE, RMSE, $R^2$ и MAPE, подобрать число деревьев, глубину и размер листа через \texttt{GridSearchCV} и разобрать вклад признаков.
+
+%======================== 3. ТЕОРИЯ ========================
+\section{Теория}
+
+\subsection{Постановка задачи}
+В регрессии каждому объекту $x_i$ сопоставлено число $y_i$, а модель выдаёт прогноз $\hat y(x)$. Качество смотрят на отложенной тестовой выборке: она не участвует ни в обучении, ни в выборе гиперпараметров. Нижняя опора "--- константный прогноз. Если всем объектам приписать среднее цели на обучении, на обучающей части $R^2 = 0$, а RMSE равен разбросу ответов вокруг этого среднего. Модель имеет смысл, пока её ошибка заметно меньше этого уровня.
+
+\subsection{Дерево регрессии}
+Дерево рекурсивно делит выборку по одному признаку и порогу. Для регрессии кандидат в разбиение оценивают взвешенной среднеквадратичной ошибкой потомков. В узле из $n$ объектов с левой и правой частями размеров $n_L$ и $n_R$ она равна
+\[
+\frac{n_L}{n}\,\mathrm{MSE}_L + \frac{n_R}{n}\,\mathrm{MSE}_R,
+\]
+где MSE части "--- средний квадрат отклонения ответов от их же среднего. Выбирают разбиение с наименьшей такой величиной. Лист прогнозирует среднее $y$ попавших в него объектов обучения.
+
+Дерево сравнивает признак с порогом, поэтому монотонное преобразование одного столбца (логарифм, стандартизация) не меняет набор допустимых разбиений: порог просто пересчитывается в новых единицах. Глубина и минимальный размер листа ограничивают число разбиений. Без них дерево доходит до листьев из одного объекта и на обучении повторяет ответы почти точно, а на новых данных ошибка растёт.
+
+Важность признака "--- суммарное взвешенное падение MSE по всем узлам, где признак был выбран, усреднённое по деревьям и нормированное на единицу. Большая важность означает, что признак часто даёт чистые по ответу группы. Она не показывает знак влияния и завышает один столбец, если рядом стоит его почти точная копия: разбиения достаются то одному, то другому.
+
+\subsection{Случайный лес}
+Случайный лес усредняет $B$ деревьев регрессии:
+\[
+\hat y(x) = \frac{1}{B}\sum_{b=1}^{B} T_b(x).
+\]
+Дерево $T_b$ учится на бутстреп-выборке: $N$ объектов берутся из обучения с возвращением, так что часть строк в дерево не попадает. Усреднение снижает разброс отдельных глубоких деревьев. В классической постановке Бреймана на каждом разбиении ещё рассматривают случайное подмножество признаков. В \texttt{RandomForestRegressor} из \texttt{sklearn} параметр \texttt{max\_features} по умолчанию равен $1{,}0$: в разбиение допускаются все признаки, и случайность леса даёт бутстреп. Число деревьев по умолчанию равно 100, глубина не ограничена, лист может содержать один объект.
+
+Рост $B$ стабилизирует среднее и почти не увеличивает смещение. Ограничение глубины и увеличение минимального листа упрощают отдельные деревья: обучение запоминается хуже, а слишком жёсткое ограничение поднимает ошибку и на тесте, если зависимость не укладывается в короткие правила.
+
+\subsection{Метрики качества}
+Пусть на выборке из $n$ объектов ответы $y_i$, прогнозы $\hat y_i$, а $\bar y$ "--- среднее ответов этой же выборки. Тогда
+\begin{align*}
+\mathrm{MSE} &= \frac{1}{n}\sum_{i=1}^{n}(y_i - \hat y_i)^2, &
+\mathrm{RMSE} &= \sqrt{\mathrm{MSE}}, \\[1mm]
+\mathrm{MAE} &= \frac{1}{n}\sum_{i=1}^{n}|y_i - \hat y_i|, &
+R^2 &= 1 - \frac{\sum_{i=1}^{n}(y_i - \hat y_i)^2}{\sum_{i=1}^{n}(y_i - \bar y)^2}.
+\end{align*}
+MSE и RMSE штрафуют крупные промахи сильнее, чем мелкие. RMSE выражен в единицах цели, MAE "--- средняя абсолютная ошибка в тех же единицах. $R^2$ показывает, какую долю разброса цели модель сняла относительно константы $\bar y$. Значение $1$ означает точное совпадение, значение $0$ "--- уровень константного прогноза.
+
+MAPE "--- средняя абсолютная ошибка в процентах от истинного ответа:
+\[
+\mathrm{MAPE} = \frac{100}{n}\sum_{i=1}^{n}\left|\frac{y_i - \hat y_i}{y_i}\right|.
+\]
+Метрика определена, пока $y_i \neq 0$. На шкале рейтинга, где все значения положительны, это выполнено. Одинаковый промах в пунктах даёт больший MAPE у игрока с низким рейтингом.
+
+Метрики на обучении и на тесте читают вместе. Если обучение почти безошибочно, а тест заметно хуже, деревья запомнили выборку. Если обе ошибки близки и малы относительно разброса цели, лес обобщает.
+
+\subsection{Подготовка данных и выбор гиперпараметров}
+Пропуски заполняют правилом, которое не подглядывает в тест. Медиана и мода, посчитанные по всей таблице до разбиения, уже содержат тестовые строки. Поэтому \texttt{SimpleImputer} ставят внутрь \texttt{Pipeline}: на кросс-валидации статистики считаются по обучающим фолдам, а отложенный тест не влияет на них вообще. То же относится к \texttt{StandardScaler}. Дереву масштаб не нужен, но стандартизатор входит в условие работы и живёт в том же конвейере, что и лес. Категорию с небольшим числом уровней кодируют индикаторами. Один уровень оставляют опорным (\texttt{drop='first'}), чтобы столбцы не дублировали друг друга.
+
+Преобразование, которому не нужна статистика выборки, можно сделать до разбиения: достать год из строки даты, пометить пропуск отдельным признаком, свернуть редкие уровни в группы. Заполнять признак медианой внутри групп целевой переменной нельзя: в заполненное значение попадает сама цель.
+
+Гиперпараметры перебирают сеткой \texttt{GridSearchCV} только по обучающей части. Для регрессии критерий "--- RMSE (\texttt{neg\_root\_mean\_squared\_error}: у скорера знак обратный, потому что поиск максимизирует оценку). Лучшую конфигурацию заново обучают на всей обучающей выборке и один раз проверяют на тесте.
+
+%======================== 4. ЗАДАНИЕ ========================
+\section{Формулировка индивидуального задания}
+
+Вариант "--- случайный лес, задача регрессии. Данные "--- \texttt{fifa.csv}, тот же набор FIFA, что в лабораторных по разведочному анализу и градиентному спуску: 18\,207 игроков и 18 столбцов. Целевая переменная "--- общий рейтинг \texttt{Overall}.
+
+\begin{enumerate}
+\item Подготовить и проанализировать набор данных. Обработать пропуски, стандартизировать числовые признаки и закодировать категориальные. Масштабирование выполнить, если оно нужно постановке.
+\item Обучить случайный лес с исходными параметрами на тренировочной части и получить прогнозы на тестовой.
+\item Оценить качество. Для регрессии в задании указаны MSE, RMSE и $R^2$; дополнительно считаются MAE и MAPE.
+\item Визуализировать результаты. Для регрессии вместо матрицы ошибок строятся диаграмма <<факт "--- прогноз>> и гистограмма остатков.
+\item Подобрать гиперпараметры: число деревьев, глубину и размер листа.
+\item Перебор выполнить через \texttt{GridSearchCV}.
+\item Повторить обучение и оценку с найденными параметрами.
+\item Разобрать важность признаков и построить её график. Определить, какие признаки дают основной вклад.
+\end{enumerate}
+
+Пропуски есть у \texttt{Club} (241), \texttt{Value} (252), \texttt{Contract Valid Until} (289), \texttt{International Reputation} и \texttt{Skill Moves} (по 48). Их закрывает импутатор внутри конвейера. \texttt{ID} и \texttt{Name} "--- идентификаторы. \texttt{Nationality} (164 уровня) и \texttt{Club} (651 уровень) в модель не входят: индикаторы раздули бы матрицу. Двадцать семь позиций сворачиваются в группы GK, DEF, MID и FWD. Пропуск клуба сохраняется отдельным признаком свободного агента. \texttt{Value} не заполняется медианой по группам \texttt{Overall}: рейтинг является целью. Денежные столбцы перед стандартизацией проходят \texttt{log1p}.
+
+%======================== 5. КОД ========================
+\section{Код решения индивидуального задания}
+
+\subsection{Загрузка и обзор (пункт 1)}
+\begin{minted}{python}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_absolute_percentage_error,
+    mean_squared_error,
+    r2_score,
+)
+from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
+
+raw = pd.read_csv('fifa.csv')
+print(raw.shape)
+raw.info()
+
+na = raw.isna().sum()
+na = na[na > 0].to_frame('Пропуски')
+na['Доля, %'] = (na['Пропуски'] / len(raw) * 100).round(2)
+na
+
+num_preview = [
+    'Age', 'Potential', 'Value', 'Wage', 'International Reputation',
+    'Skill Moves', 'Joined', 'Height', 'Weight', 'Release Clause',
+]
+corr = raw[num_preview + ['Overall']].corr(numeric_only=True)['Overall']
+corr.sort_values(ascending=False).round(3)
+\end{minted}
+
+\subsection{Очистка без статистики выборки (пункт 1)}
+\begin{minted}{python}
+df = raw.copy()
+
+df['Contract Year'] = pd.to_numeric(
+    df['Contract Valid Until'].astype(str).str.extract(r'(\d{4})')[0],
+    errors='coerce',
+)
+df['Is_Free_Agent'] = df['Club'].isna().astype(int)
+
+pos_map = {
+    'GK': 'GK',
+    'CB': 'DEF', 'LCB': 'DEF', 'RCB': 'DEF', 'LB': 'DEF',
+    'RB': 'DEF', 'LWB': 'DEF', 'RWB': 'DEF',
+    'CM': 'MID', 'LCM': 'MID', 'RCM': 'MID', 'CDM': 'MID',
+    'LDM': 'MID', 'RDM': 'MID', 'CAM': 'MID', 'LAM': 'MID',
+    'RAM': 'MID', 'LM': 'MID', 'RM': 'MID',
+    'ST': 'FWD', 'LS': 'FWD', 'RS': 'FWD', 'CF': 'FWD',
+    'LF': 'FWD', 'RF': 'FWD', 'LW': 'FWD', 'RW': 'FWD',
+}
+df['Position_Group'] = df['Position'].map(pos_map).fillna('Other')
+
+df = df.drop(columns=[
+    'ID', 'Name', 'Nationality', 'Club', 'Position', 'Contract Valid Until',
+])
+
+print('Пропусков после подготовки:', int(df.isna().sum().sum()))
+df.isna().sum()[lambda s: s > 0]
+\end{minted}
+
+\subsection{Разбиение и конвейер (пункты 1 и 2)}
+\begin{minted}{python}
+X = df.drop(columns=['Overall'])
+y = df['Overall']
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+money_cols = ['Value', 'Wage', 'Release Clause']
+num_cols = [
+    'Age', 'Potential', 'International Reputation', 'Skill Moves',
+    'Joined', 'Contract Year', 'Height', 'Weight', 'Is_Free_Agent',
+]
+cat_cols = ['Preferred Foot', 'Position_Group']
+
+def make_pipeline():
+    money_pipe = Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('log', FunctionTransformer(np.log1p, feature_names_out='one-to-one')),
+        ('scaler', StandardScaler()),
+    ])
+    num_pipe = Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler()),
+    ])
+    cat_pipe = Pipeline([
+        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('onehot', OneHotEncoder(
+            drop='first', handle_unknown='ignore', sparse_output=False,
+        )),
+    ])
+    preprocess = ColumnTransformer([
+        ('money', money_pipe, money_cols),
+        ('num', num_pipe, num_cols),
+        ('cat', cat_pipe, cat_cols),
+    ])
+    return Pipeline([
+        ('prep', preprocess),
+        ('rf', RandomForestRegressor(random_state=42, n_jobs=-1)),
+    ])
+
+baseline = make_pipeline()
+baseline.fit(X_train, y_train)
+pred_train = baseline.predict(X_train)
+pred_test = baseline.predict(X_test)
+\end{minted}
+
+Медиана, \texttt{StandardScaler} и мода обучаются только на тех строках, на которых в данный момент учится лес. Для денег порядок шагов такой: медиана, \texttt{log1p}, стандартизация. Остальные числа идут без логарифма. \texttt{Preferred Foot} и группа позиции кодируются индикаторами с опорным уровнем. Перебор дальше использует тот же \texttt{make\_pipeline}, поэтому базовая модель и сетка готовят признаки одинаково.
+
+\subsection{Метрики и графики базовой модели (пункты 3 и 4)}
+\begin{minted}{python}
+def regression_metrics(y_true, y_pred):
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    mse = mean_squared_error(y_true, y_pred)
+    return pd.Series({
+        'MSE': mse,
+        'MAE': mean_absolute_error(y_true, y_pred),
+        'RMSE': float(np.sqrt(mse)),
+        'R2': r2_score(y_true, y_pred),
+        'MAPE, %': mean_absolute_percentage_error(y_true, y_pred) * 100,
+    })
+
+baseline_train = regression_metrics(y_train, pred_train)
+baseline_test = regression_metrics(y_test, pred_test)
+pd.DataFrame({'train': baseline_train, 'test': baseline_test}).round(4)
+
+residuals = y_test.to_numpy() - pred_test
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+axes[0].scatter(y_test, pred_test, alpha=0.25, s=12)
+lims = [float(y_test.min()), float(y_test.max())]
+axes[0].plot(lims, lims, color='black', linewidth=1)
+axes[0].set_xlabel('Факт, Overall')
+axes[0].set_ylabel('Прогноз')
+axes[0].set_title('Базовая модель: факт и прогноз')
+axes[1].hist(residuals, bins=40)
+axes[1].axvline(0, color='black', linewidth=1)
+axes[1].set_xlabel('Остаток (факт − прогноз)')
+axes[1].set_ylabel('Число игроков')
+axes[1].set_title('Базовая модель: остатки на тесте')
+plt.tight_layout()
+plt.show()
+\end{minted}
+
+Точка на диагонали "--- точный прогноз. Остаток равен разности факта и прогноза. Сдвиг гистограммы от нуля показал бы систематическое завышение или занижение рейтинга.
+
+\subsection{Подбор параметров и повторная оценка (пункты 5--7)}
+\begin{minted}{python}
+param_grid = {
+    'rf__n_estimators': [100, 200],
+    'rf__max_depth': [None, 12, 20],
+    'rf__min_samples_leaf': [1, 4],
+}
+
+search = GridSearchCV(
+    make_pipeline(),
+    param_grid,
+    cv=3,
+    scoring='neg_root_mean_squared_error',
+    n_jobs=1,
+    refit=True,
+)
+search.fit(X_train, y_train)
+print('Лучшие параметры:', search.best_params_)
+print('RMSE на кросс-валидации:', round(-search.best_score_, 4))
+
+best = search.best_estimator_
+tuned_train = regression_metrics(y_train, best.predict(X_train))
+tuned_test = regression_metrics(y_test, best.predict(X_test))
+pd.DataFrame({
+    'baseline train': baseline_train,
+    'baseline test': baseline_test,
+    'tuned train': tuned_train,
+    'tuned test': tuned_test,
+}).round(4)
+\end{minted}
+
+Сетка содержит 12 конфигураций и 3 фолда, то есть 36 обучений. Критерий "--- RMSE. \texttt{refit=True} заново учит лучший конвейер на всей обучающей части. Поиск идёт последовательно: внутри одного леса деревья уже считаются параллельно (\texttt{n\_jobs=-1}).
+
+Для найденной модели строятся те же два графика, что и для базовой: факт против прогноза и гистограмма остатков на тесте.
+
+\subsection{Важность признаков (пункты 8 и 9)}
+\begin{minted}{python}
+feature_names = best.named_steps['prep'].get_feature_names_out()
+importance = pd.Series(
+    best.named_steps['rf'].feature_importances_,
+    index=[name.split('__', 1)[-1] for name in feature_names],
+)
+importance = importance.sort_values(ascending=True)
+
+fig, ax = plt.subplots(figsize=(8, 6))
+importance.plot.barh(ax=ax, color='steelblue')
+ax.set_xlabel('Важность')
+ax.set_title('Вклад признаков в случайный лес')
+plt.tight_layout()
+plt.show()
+
+ranked = importance.sort_values(ascending=False)
+print(ranked.head(5).round(4).to_string())
+print('Доля топ-3:', round(float(ranked.head(3).sum()), 4))
+\end{minted}
+
+Имена берутся из матрицы, которую конвейер отдаёт лесу. Префиксы групп \texttt{money}, \texttt{num} и \texttt{cat} отбрасываются, на графике остаются исходные названия признаков и уровни индикаторов.
+
+%======================== 6. ВЫВОДЫ ========================
+\newpage
+\section{Выводы по лабораторной работе}
+
+В ходе работы на 18\,207 игроках FIFA обучен регрессионный случайный лес для рейтинга \texttt{Overall}. После отбора столбцов в таблице 14 признаков, часть из них ещё содержит пропуски: \texttt{Value} "--- 252, год контракта "--- 289, международная репутация и финты "--- по 48. Эти пропуски закрывает медиана или мода внутри конвейера, статистики не считаются по тесту и не используют цель. Обучающая часть содержит 14\,565 объектов, тестовая "--- 3\,642. Средний рейтинг на обучении $66{,}23$ при стандартном отклонении $6{,}93$, на тесте $66{,}29$ и $6{,}82$. Константный прогноз средним ошибся бы примерно на 7 пунктов. Корреляция с целью до очистки наибольшая у \texttt{Potential} ($0{,}661$), \texttt{Value} ($0{,}632$), \texttt{Release Clause} ($0{,}598$) и \texttt{Wage} ($0{,}572$).
+
+Базовый лес "--- 100 деревьев, глубина не ограничена, лист из одного объекта. На обучении RMSE $0{,}176$, MAE $0{,}091$, $R^2 = 0{,}999$, MAPE $0{,}14~\%$. На тесте RMSE $0{,}478$, MAE $0{,}240$, MSE $0{,}229$, $R^2 = 0{,}995$, MAPE $0{,}38~\%$. Разрыв обучения и теста показывает, что глубокие деревья запоминают выборку плотнее, чем обобщают её. Сама тестовая ошибка при этом меньше половины пункта рейтинга и далека от ошибки константы. Точки «факт "--- прогноз» лежат вдоль диагонали, остатки собраны около нуля.
+
+\texttt{GridSearchCV} по трём фолдам выбрал 200 деревьев, глубину 20 и лист из одного объекта. RMSE на кросс-валидации равен $0{,}507$. На тесте у этой модели MSE $0{,}224$, MAE $0{,}239$, RMSE $0{,}474$, $R^2 = 0{,}995$, MAPE $0{,}38~\%$. Сдвиг RMSE относительно базового леса "--- около $0{,}005$ пункта. Увеличение числа деревьев стабилизировало среднее, а ограничение глубины до 20 почти не изменило уже насыщенное качество. Минимальный лист сетка оставила равным одному: укрупнение листьев до четырёх объектов на этой зависимости не выигрывало у RMSE.
+
+Почти весь вклад приходится на \texttt{Value}: важность $0{,}881$. Дальше идут \texttt{Age} ($0{,}076$) и \texttt{Potential} ($0{,}038$). Вместе три признака дают $0{,}994$ суммарной важности. \texttt{Release Clause} и \texttt{Weight} остаются на уровне $0{,}001$, позиция и рабочая нога на графике практически не видны. Такое распределение согласуется с устройством данных FIFA: стоимость игрока считается из рейтинга, поэтому \texttt{Value} почти повторяет цель, хотя линейная корреляция у потенциала выше. Лес берёт тот признак, по которому порог сразу отделяет уровни \texttt{Overall}, а не тот, у которого корреляция Пирсона максимальна. При известной стоимости возраст и потенциал лишь поправляют прогноз, а амплуа почти ничего не добавляет.
+
+Высокий $R^2$ поэтому не стоит читать как открытие сложной зависимости. Модель честно использует столбец, в котором рейтинг уже зашит формулой игры. На признаках без стоимости ошибка была бы другой; сравнение базового леса и подобранного от этого не меняется: оба упираются в один и тот же потолок. Стандартизация и \texttt{log1p} на качество дерева почти не влияют, потому что разбиение монотонно инвариантно, и стоят в конвейере по условию работы.
+
+Все пункты задания выполнены. Случайный лес предсказывает \texttt{Overall} со средней абсолютной ошибкой около $0{,}24$ пункта на тесте. Подбор числа деревьев и глубины улучшает RMSE незначительно. Основной вклад вносит стоимость игрока, затем возраст и потенциал.
+\end{document}
